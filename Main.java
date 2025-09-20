@@ -1,101 +1,124 @@
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.math.BigInteger;
 import java.util.*;
 
-public class Main {
+public class PolynomialSolver {
 
-    // Evaluate polynomial at x (BigInteger version)
-    public static BigInteger evaluatePolynomial(List<BigInteger> coeffs, BigInteger x) {
-        BigInteger result = BigInteger.ZERO;
-        BigInteger power = BigInteger.ONE;
-        for (BigInteger c : coeffs) {
-            result = result.add(c.multiply(power));
-            power = power.multiply(x);
+    // Fetch JSON text from a URL
+    private static String fetchJson(String urlStr) throws Exception {
+        URL url = new URL(urlStr);
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(url.openStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                sb.append(line);
+            }
+        }
+        return sb.toString();
+    }
+
+    // Parse "base" and "value" pairs manually from JSON string
+    private static Map<String, Map<String, String>> parseJsonRoots(String jsonText) {
+        Map<String, Map<String, String>> result = new HashMap<>();
+
+        // remove spaces and newlines for easier parsing
+        String clean = jsonText.replaceAll("\\s+", "");
+
+        // split by "},"
+        String[] parts = clean.split("},");
+        for (String part : parts) {
+            if (part.contains("\"keys\"")) continue; // skip keys object
+
+            // find root id
+            int quoteIdx = part.indexOf("\"");
+            if (quoteIdx == -1) continue;
+            String id = part.substring(quoteIdx + 1, part.indexOf("\"", quoteIdx + 1));
+
+            if (!id.matches("\\d+")) continue; // only numeric keys
+
+            // find base
+            String base = "";
+            String value = "";
+            if (part.contains("\"base\"")) {
+                int baseStart = part.indexOf("\"base\":\"") + 8;
+                int baseEnd = part.indexOf("\"", baseStart);
+                base = part.substring(baseStart, baseEnd);
+            }
+            if (part.contains("\"value\"")) {
+                int valStart = part.indexOf("\"value\":\"") + 9;
+                int valEnd = part.indexOf("\"", valStart);
+                value = part.substring(valStart, valEnd);
+            }
+
+            Map<String, String> inner = new HashMap<>();
+            inner.put("base", base);
+            inner.put("value", value);
+            result.put(id, inner);
         }
         return result;
     }
 
-    // Build polynomial from roots (BigInteger version)
-    public static List<BigInteger> generatePolynomial(List<BigInteger> roots) {
-        int degree = roots.size();
-        List<BigInteger> coeffs = new ArrayList<>(Collections.nCopies(degree + 1, BigInteger.ZERO));
-        coeffs.set(0, BigInteger.ONE); // leading coefficient
+    // Convert base + value to decimal BigInteger
+    private static BigInteger parseValue(String baseStr, String value) {
+        int base = Integer.parseInt(baseStr);
+        return new BigInteger(value, base);
+    }
 
-        for (BigInteger root : roots) {
-            List<BigInteger> newCoeffs = new ArrayList<>(Collections.nCopies(coeffs.size(), BigInteger.ZERO));
-            for (int i = 0; i < coeffs.size() - 1; i++) {
-                newCoeffs.set(i, newCoeffs.get(i).add(coeffs.get(i).multiply(root.negate())));
-                newCoeffs.set(i + 1, newCoeffs.get(i + 1).add(coeffs.get(i)));
+    // Generate polynomial coefficients from roots
+    // Polynomial: (x - r1)(x - r2)...(x - rn)
+    private static BigInteger[] polynomialFromRoots(List<BigInteger> roots) {
+        BigInteger[] coeffs = { BigInteger.ONE }; // start with 1
+        for (BigInteger r : roots) {
+            BigInteger[] newCoeffs = new BigInteger[coeffs.length + 1];
+            Arrays.fill(newCoeffs, BigInteger.ZERO);
+
+            for (int i = 0; i < coeffs.length; i++) {
+                // x * coeffs[i]
+                newCoeffs[i] = newCoeffs[i].add(coeffs[i]);
+                // -r * coeffs[i]
+                newCoeffs[i + 1] = newCoeffs[i + 1].subtract(coeffs[i].multiply(r));
             }
             coeffs = newCoeffs;
         }
         return coeffs;
     }
 
-    // Read file content into string
-    public static String readFile(String filename) throws IOException {
-        BufferedReader br = new BufferedReader(new FileReader(filename));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        while ((line = br.readLine()) != null) {
-            sb.append(line.trim());
-        }
-        br.close();
-        return sb.toString();
-    }
-
     public static void main(String[] args) {
         try {
-            // Load input.json as plain string
-            String json = readFile("input.json");
+            // 🔴 Replace this with your actual raw JSON link
+            String jsonUrl = "https://raw.githubusercontent.com/Ajayvarma-github/polynomialproblem/refs/heads/main/Ajay.json";
 
-            // Extract n and k
-            int n = Integer.parseInt(json.replaceAll(".*\"n\"\\s*:\\s*(\\d+).*", "$1"));
-            int k = Integer.parseInt(json.replaceAll(".*\"k\"\\s*:\\s*(\\d+).*", "$1"));
+            // Fetch JSON
+            String jsonText = fetchJson(jsonUrl);
 
-            // Open writer for output file
-            PrintWriter writer = new PrintWriter(new FileWriter("output.txt"));
+            // Parse roots
+            Map<String, Map<String, String>> rootsData = parseJsonRoots(jsonText);
 
-            // Find all base/value pairs
             List<BigInteger> roots = new ArrayList<>();
-            String[] entries = json.split("\\},");
-            for (String entry : entries) {
-                if (entry.contains("\"base\"")) {
-                    String baseStr = entry.replaceAll(".*\"base\"\\s*:\\s*\"(\\w+)\".*", "$1");
-                    String valueStr = entry.replaceAll(".*\"value\"\\s*:\\s*\"([\\w]+)\".*", "$1");
-                    int base = Integer.parseInt(baseStr);
-                    BigInteger decimalValue = new BigInteger(valueStr, base);
-                    roots.add(decimalValue);
-                }
+            for (String key : rootsData.keySet()) {
+                String base = rootsData.get(key).get("base");
+                String value = rootsData.get(key).get("value");
+                roots.add(parseValue(base, value));
             }
 
-            writer.println("n = " + n + ", k = " + k);
-            writer.println("Extracted roots in decimal:");
-            for (BigInteger r : roots) {
-                writer.println(r.toString());
+            // Print roots
+            Collections.sort(roots);
+            System.out.println("Roots (decimal): " + roots);
+
+            // Polynomial coefficients
+            BigInteger[] coeffs = polynomialFromRoots(roots);
+            System.out.println("Polynomial coefficients (highest degree → constant):");
+            for (BigInteger c : coeffs) {
+                System.out.print(c.toString() + " ");
             }
-
-            // Use first k roots to form polynomial
-            List<BigInteger> usedRoots = roots.subList(0, k);
-            List<BigInteger> coefficients = generatePolynomial(usedRoots);
-
-            writer.println("Polynomial coefficients (lowest to highest degree):");
-            for (BigInteger c : coefficients) {
-                writer.println(c.toString());
-            }
-
-            // Validate all roots
-            writer.println("Validation of roots:");
-            for (BigInteger root : roots) {
-                BigInteger result = evaluatePolynomial(coefficients, root);
-                writer.println("f(" + root + ") = " + result);
-            }
-
-            writer.close();
-            System.out.println("Output written to output.txt");
+            System.out.println();
 
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
-} **
+}
